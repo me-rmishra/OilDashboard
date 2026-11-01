@@ -29,14 +29,18 @@ def cached(key, fn, ok):
         return dict(hit[1], stale=True, errors=val.get("errors", {}))
     return val
 
-def get(url, tries=3):
+def get(url, tries=3, timeout=15, headers=UA):
     err = None
     for i in range(tries):
         try:
-            return urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15).read()
+            return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout).read()
         except Exception as e:
             err = e; time.sleep(1 + i)
     raise err
+
+def fred(sid):
+    rows = [l.split(",") for l in get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={sid}", 3, 30, {"User-Agent": "OilDashboard/1.0 (+https://github.com/me-rmishra/OilDashboard)"}).decode().splitlines()[1:]]
+    return {r[0][:7]: float(r[1]) for r in rows if len(r) == 2 and r[1] not in ("", ".")}
 
 def fetch_sym(sym):
     try: raw = get(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=1y&interval=1d", 2)
@@ -68,6 +72,33 @@ def build_prices():
     derive("3-2-1 crack (vs Brent)", lambda b, g, h: (2 * g * 42 + h * 42 - 3 * b) / 3, ["BZ=F", "RB=F", "HO=F"])
     # simple proxy: 50% gasoline / 40% diesel (distillate) / 10% residue at ~60% of crude, vs Brent
     derive("Simple GRM proxy (vs Brent)", lambda b, g, h: 0.5 * g * 42 + 0.4 * h * 42 + 0.1 * 0.6 * b - b, ["BZ=F", "RB=F", "HO=F"])
+    # WTI-referenced cracks (daily)
+    derive("Gasoline crack (vs WTI)", lambda w, g: g * 42 - w, ["CL=F", "RB=F"])
+    derive("Diesel crack (vs WTI)", lambda w, h: h * 42 - w, ["CL=F", "HO=F"])
+    derive("Simple GRM proxy (vs WTI)", lambda w, g, h: 0.5 * g * 42 + 0.4 * h * 42 + 0.1 * 0.6 * w - w, ["CL=F", "RB=F", "HO=F"])
+    # Dubai: free source is monthly IMF averages via FRED (no free daily Dubai exists)
+    out["monthly"] = {}
+    try:
+        dub, bre = fred("POILDUBUSDM"), fred("POILBREUSDM")
+        months = sorted(dub)[-24:]
+        out["monthly"]["Dubai (monthly avg)"] = [[m + "-01", dub[m]] for m in months]
+        out["monthly"]["Brent-Dubai (monthly)"] = [[m + "-01", bre[m] - dub[m]] for m in months if m in bre]
+        def mavg(sym):
+            acc = {}
+            for t, c in series.get(sym, {}).items():
+                a = acc.setdefault(time.strftime("%Y-%m", time.gmtime(t)), [0.0, 0]); a[0] += c; a[1] += 1
+            return {m: v[0] / v[1] for m, v in acc.items() if v[1] >= 15}  # skip partial months
+        rb, ho = mavg("RB=F"), mavg("HO=F")
+        g_, d_, c_, r_ = [], [], [], []
+        for m in months:
+            if m in rb and m in ho:
+                dd, g, h = dub[m], rb[m] * 42, ho[m] * 42; d = m + "-01"
+                g_.append([d, g - dd]); d_.append([d, h - dd]); c_.append([d, (2 * g + h - 3 * dd) / 3])
+                r_.append([d, 0.5 * g + 0.4 * h + 0.1 * 0.6 * dd - dd])
+        out["monthly"].update({"Gasoline crack (vs Dubai)": g_, "Diesel crack (vs Dubai)": d_,
+                               "3-2-1 crack (vs Dubai)": c_, "Simple GRM proxy (vs Dubai)": r_})
+    except Exception as e:
+        errors["Dubai (FRED monthly)"] = str(e)
     return out
 
 

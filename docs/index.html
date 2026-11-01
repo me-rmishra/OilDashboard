@@ -23,6 +23,7 @@ svg{width:100%;height:170px;display:block}svg text{fill:var(--mut);font-size:10p
 .note{color:var(--mut);font-size:12px}.err{color:var(--dn)}
 </style></head><body>
 <header><div><h1>Downstream Oil Dashboard</h1><div class="sub" id="upd">Loading…</div></div>
+<div class="ctl"><label class="sub">Cracks vs&nbsp;<select id="ref" style="border:1px solid var(--line);background:var(--card);color:var(--ink);padding:5px 8px;border-radius:6px;font:inherit"><option value="Brent">Brent</option><option value="WTI">WTI</option><option value="Dubai">Dubai (monthly)</option></select></label></div>
 <div class="ctl" id="rng"><button data-r="22">1M</button><button data-r="66">3M</button><button data-r="130">6M</button><button data-r="250" class="on">1Y</button></div></header>
 <main>
 <div class="tiles" id="tiles"></div>
@@ -31,7 +32,7 @@ svg{width:100%;height:170px;display:block}svg text{fill:var(--mut);font-size:10p
 <div class="tiles" id="etiles"></div>
 <div class="grid" id="echarts"></div>
 <div class="card news"><h2>Energy headlines</h2><div class="d">OilPrice.com, Rigzone, EIA. Filter: <input id="q" placeholder="e.g. refinery, OPEC, diesel" style="border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:3px 8px;border-radius:5px"></div><ul id="news"></ul></div>
-<div class="card note"><b>How to read this.</b> Prices are delayed front-month futures from Yahoo Finance. Cracks are computed: gasoline crack = RBOB×42 − Brent; diesel crack = ULSD×42 − Brent; 3-2-1 = (2×RBOB + 1×ULSD)×42 − 3×crude, ÷3. The <i>GRM proxy</i> assumes a simple yield (50% gasoline, 40% diesel, 10% residue at 60% of crude) and is a US-Gulf-style indicator, <b>not</b> Singapore GRM or Reliance GRM. Physical differentials (Dubai, Murban, Urals, Basrah) and Singapore cracks need Platts/Argus. Brent–WTI here is a futures spread, a proxy only.</div>
+<div class="card note"><b>How to read this.</b> Prices are delayed front-month futures from Yahoo Finance. Cracks are computed: gasoline crack = RBOB×42 − Brent; diesel crack = ULSD×42 − Brent; 3-2-1 = (2×RBOB + 1×ULSD)×42 − 3×crude, ÷3. The <i>GRM proxy</i> assumes a simple yield (50% gasoline, 40% diesel, 10% residue at 60% of crude) and is a US-Gulf-style indicator, <b>not</b> Singapore GRM or Reliance GRM. <b>Dubai</b> has no free daily price: it is the IMF monthly average (via FRED, ~1 month lag), so cracks vs Dubai are monthly averages of RBOB/ULSD futures minus that Dubai average. Murban, Urals, Basrah and Singapore cracks need Platts/Argus. Brent–WTI here is a futures spread, a proxy only.</div>
 </main>
 <script>
 let D=null,E=null,N=[],R=250;
@@ -54,12 +55,23 @@ function chart(s,color,ref,full){const a=full?s:s.slice(-R),W=520,H=170,m={l:38,
  <path d="${path}" fill="none" stroke="${color}" stroke-width="1.8"/>
  <circle cx="${X(a.length-1)}" cy="${Y(v[v.length-1])}" r="3.5" fill="${color}"/>
  <text x="${m.l}" y="${H-4}">${d0}</text><text x="${W-m.r}" y="${H-4}" text-anchor="end">${d1}</text></svg>`}
-function render(){if(!D)return;const S=D.series;
+let REF=['Brent','WTI','Dubai'].includes(new URLSearchParams(location.search).get('ref'))?new URLSearchParams(location.search).get('ref'):'Brent';
+const CRK=[['Gasoline crack','#12805c','RBOB×42 − crude, $/bbl'],['Diesel crack','#c0392b','ULSD×42 − crude, $/bbl'],['3-2-1 crack','#0e7490','(2×RBOB + ULSD)×42 − 3×crude, ÷3, $/bbl'],['Simple GRM proxy','#6d28d9','Indicative margin, $/bbl']];
+const mlab=s=>new Date(s.at(-1)[0]).toLocaleDateString(undefined,{month:'short',year:'numeric'});
+function render(){if(!D)return;const S=D.series,M=D.monthly||{},dub=REF==='Dubai';
  document.getElementById('upd').innerHTML=`Updated ${D.updated} · auto-refresh every 5 min`+(D.stale?` · <span class="err">refresh failed, showing last good data</span>`:'')+(Object.keys(D.errors).length?` · <span class="err">missing: ${Object.keys(D.errors).join(', ')}</span>`:'');
- document.getElementById('tiles').innerHTML=TILES.filter(t=>S[t[0]]).map(([k,u])=>{const s=stat(S[k]);
-  return `<div class="tile"><div class="n">${k}</div><div class="v">${fmt(s.l)} <span class="n">${u}</span></div><div class="c ${s.dd>=0?'up':'dn'}">${s.dd>=0?'▲':'▼'} ${fmt(Math.abs(s.dd))} day · <span class="${s.dr>=0?'up':'dn'}">${s.dr>=0?'+':'−'}${fmt(Math.abs(s.dr))} over range</span></div></div>`}).join('');
- document.getElementById('charts').innerHTML=CH.filter(c=>S[c[0]]).map(([k,d,c])=>{const s=stat(S[k]);
-  return `<div class="card"><h2>${k}</h2><div class="d">${d} · range avg ${fmt(s.avg)} (dashed) · high ${fmt(s.hi)} · low ${fmt(s.lo)}</div>${chart(S[k],c)}</div>`}).join('')}
+ const items=[]; // [label,unit,series,color,desc,monthly]
+ [['Brent','#1f5fbf','Crude, $/bbl'],['WTI','#7a4fc4','Crude, $/bbl'],['Brent-WTI','#b45f06','Futures spread, $/bbl']].forEach(([k,c,d])=>S[k]&&items.push([k,'$/bbl',S[k],c,d,0]));
+ if(M['Dubai (monthly avg)'])items.push(['Dubai (monthly avg)','$/bbl',M['Dubai (monthly avg)'],'#a16207','IMF monthly average via FRED; latest month shown, ~1 month lag',1]);
+ if(M['Brent-Dubai (monthly)'])items.push(['Brent-Dubai (monthly)','$/bbl',M['Brent-Dubai (monthly)'],'#be185d','IMF monthly averages; negative = Dubai above Brent',1]);
+ CRK.forEach(([n,c,d])=>{const k=`${n} (vs ${REF})`,x=dub?M[k]:S[k];x&&x.length&&items.push([k,'$/bbl',x,c,d+(dub?' · monthly avg, Dubai = IMF':''),dub?1:0])});
+ const tl=items.map(([k,u,x,c,d,mo])=>({k,u,x,c,d,mo,s:stat(mo?x:x)}));
+ const tiles=tl.map(({k,u,x,mo})=>{const a=mo?x:x.slice(-R),l=a.at(-1)[1],p=x.length>1?x.at(-2)[1]:l,f=a[0][1],dd=l-p,dr=l-f;
+  return `<div class="tile"><div class="n">${k}${mo?` · ${mlab(x)}`:''}</div><div class="v">${fmt(l)} <span class="n">${u}</span></div><div class="c ${dd>=0?'up':'dn'}">${dd>=0?'▲':'▼'} ${fmt(Math.abs(dd))} ${mo?'m/m':'day'} · <span class="${dr>=0?'up':'dn'}">${dr>=0?'+':'−'}${fmt(Math.abs(dr))} ${mo?'over '+a.length+' mo':'over range'}</span></div></div>`}).join('');
+ const hg=S['Henry Hub Gas'];const hgt=hg?(()=>{const s2=stat(hg);return `<div class="tile"><div class="n">Henry Hub Gas</div><div class="v">${fmt(s2.l)} <span class="n">$/MMBtu</span></div><div class="c ${s2.dd>=0?'up':'dn'}">${s2.dd>=0?'▲':'▼'} ${fmt(Math.abs(s2.dd))} day</div></div>`})():'';
+ document.getElementById('tiles').innerHTML=tiles+hgt;
+ document.getElementById('charts').innerHTML=tl.map(({k,x,c,d,mo})=>{const a=mo?x.map(r=>r[1]):x.slice(-R).map(r=>r[1]),avg=a.reduce((p,q)=>p+q,0)/a.length;
+  return `<div class="card"><h2>${k}${mo?' <span class="tag">monthly</span>':''}</h2><div class="d">${d} · avg ${fmt(avg)} (dashed) · high ${fmt(Math.max(...a))} · low ${fmt(Math.min(...a))}</div>${chart(x,c,null,mo)}</div>`}).join('')}
 const EC=[['US commercial crude stocks (ex-SPR)','Million bbl, weekly','#1f5fbf'],['Cushing crude stocks','Million bbl, weekly','#7a4fc4'],['US gasoline stocks','Million bbl, weekly','#12805c'],['US distillate stocks','Million bbl, weekly','#c0392b'],['Refinery utilisation','% of operable capacity','#b45f06'],['Refinery crude runs','Million bbl/day (crude inputs)','#0e7490']];
 function renderE(){if(!E)return;const S=E.series,K=Object.keys(S);
  document.getElementById('eiaupd').innerHTML=`Weekly, latest week ending ${K.length?S[K[0]].data.at(-1)[0]:'–'} · dashed line = 5-year average for the same week`+(E.stale?' · <span class="err">showing last good data</span>':'')+(Object.keys(E.errors).length?` · <span class="err">missing: ${Object.keys(E.errors).join(', ')}</span>`:'');
@@ -78,5 +90,7 @@ async function load(){let bad=false;
  if(bad)setTimeout(load,30000)}
 document.getElementById('rng').onclick=e=>{if(e.target.dataset.r){R=+e.target.dataset.r;[...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b===e.target));render()}};
 document.getElementById('q').oninput=renderNews;
+document.getElementById('ref').onchange=e=>{REF=e.target.value;render()};
+document.getElementById('ref').value=REF;
 load();setInterval(load,300000);
 </script></body></html>
