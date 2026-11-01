@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Downstream Oil Dashboard</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1b2430;--mut:#667085;--line:#e4e7ec;--a:#1f5fbf;--up:#12805c;--dn:#c0392b}
+@media(prefers-color-scheme:dark){:root{--bg:#10151c;--card:#171e28;--ink:#e6eaf0;--mut:#8a94a6;--line:#263041;--a:#6aa6ff;--up:#4cc39a;--dn:#ff7b6b}}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 -apple-system,Segoe UI,Calibri,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid var(--line);background:var(--card)}
+h1{font-size:18px;margin:0}.sub{color:var(--mut);font-size:12px}
+.ctl button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:5px 12px;cursor:pointer;font:inherit}
+.ctl button:first-child{border-radius:6px 0 0 6px}.ctl button:last-child{border-radius:0 6px 6px 0}.ctl button.on{background:var(--a);color:#fff;border-color:var(--a)}
+main{max-width:1280px;margin:0 auto;padding:20px 24px;display:grid;gap:16px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.tile,.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}
+.tile .n{color:var(--mut);font-size:12px}.tile .v{font-size:24px;font-weight:600;margin:2px 0}.tile .c{font-size:12px}
+.up{color:var(--up)}.dn{color:var(--dn)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px}
+.card h2{font-size:13px;margin:0 0 2px}.card .d{color:var(--mut);font-size:11px;margin-bottom:6px}
+svg{width:100%;height:170px;display:block}svg text{fill:var(--mut);font-size:10px}
+.news a{color:var(--ink);text-decoration:none}.news a:hover{color:var(--a)}
+.news li{padding:7px 0;border-bottom:1px solid var(--line);list-style:none}.news ul{margin:0;padding:0;max-height:520px;overflow:auto}
+.src{font-size:11px;color:var(--mut)}.tag{display:inline-block;font-size:10px;border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-right:6px;color:var(--mut)}
+.note{color:var(--mut);font-size:12px}.err{color:var(--dn)}
+</style></head><body>
+<header><div><h1>Downstream Oil Dashboard</h1><div class="sub" id="upd">Loading…</div></div>
+<div class="ctl" id="rng"><button data-r="22">1M</button><button data-r="66">3M</button><button data-r="130">6M</button><button data-r="250" class="on">1Y</button></div></header>
+<main>
+<div class="tiles" id="tiles"></div>
+<div class="grid" id="charts"></div>
+<div class="card"><h2>EIA weekly: US inventories &amp; refinery activity</h2><div class="d" id="eiaupd">Loading…</div></div>
+<div class="tiles" id="etiles"></div>
+<div class="grid" id="echarts"></div>
+<div class="card news"><h2>Energy headlines</h2><div class="d">OilPrice.com, Rigzone, EIA. Filter: <input id="q" placeholder="e.g. refinery, OPEC, diesel" style="border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:3px 8px;border-radius:5px"></div><ul id="news"></ul></div>
+<div class="card note"><b>How to read this.</b> Prices are delayed front-month futures from Yahoo Finance. Cracks are computed: gasoline crack = RBOB×42 − Brent; diesel crack = ULSD×42 − Brent; 3-2-1 = (2×RBOB + 1×ULSD)×42 − 3×crude, ÷3. The <i>GRM proxy</i> assumes a simple yield (50% gasoline, 40% diesel, 10% residue at 60% of crude) and is a US-Gulf-style indicator, <b>not</b> Singapore GRM or Reliance GRM. Physical differentials (Dubai, Murban, Urals, Basrah) and Singapore cracks need Platts/Argus. Brent–WTI here is a futures spread, a proxy only.</div>
+</main>
+<script>
+let D=null,E=null,N=[],R=250;
+const fmt=(x,d=2)=>x==null?'–':x.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+const TILES=[['Brent','$/bbl'],['WTI','$/bbl'],['Brent-WTI','$/bbl'],['Gasoline crack (vs Brent)','$/bbl'],['Diesel crack (vs Brent)','$/bbl'],['3-2-1 crack (vs Brent)','$/bbl'],['Simple GRM proxy (vs Brent)','$/bbl'],['Henry Hub Gas','$/MMBtu']];
+const CH=[['Brent','Crude, $/bbl','#1f5fbf'],['WTI','Crude, $/bbl','#7a4fc4'],['Brent-WTI','Futures spread, $/bbl','#b45f06'],
+['Gasoline crack (vs Brent)','RBOB×42 − Brent, $/bbl','#12805c'],['Diesel crack (vs Brent)','ULSD×42 − Brent, $/bbl','#c0392b'],['3-2-1 crack (vs WTI)','$/bbl','#1f5fbf'],
+['3-2-1 crack (vs Brent)','$/bbl','#0e7490'],['Simple GRM proxy (vs Brent)','Indicative margin, $/bbl','#6d28d9']];
+function stat(s){const a=s.slice(-R),l=a[a.length-1][1],p=s.length>1?s[s.length-2][1]:l,f=a[0][1];
+ const v=a.map(x=>x[1]);return{l,dd:l-p,dr:l-f,avg:v.reduce((x,y)=>x+y,0)/v.length,hi:Math.max(...v),lo:Math.min(...v)}}
+function chart(s,color,ref,full){const a=full?s:s.slice(-R),W=520,H=170,m={l:38,r:8,t:8,b:18};const v=a.map(x=>x[1]);
+ const rv=ref?ref.map(x=>x[1]):[];let lo=Math.min(...v,...rv),hi=Math.max(...v,...rv),pad=(hi-lo)*.08||1;lo-=pad;hi+=pad;
+ const X=i=>m.l+i*(W-m.l-m.r)/(a.length-1||1),Y=y=>m.t+(hi-y)*(H-m.t-m.b)/(hi-lo);
+ const avg=v.reduce((x,y)=>x+y,0)/v.length;let g='';const rp=ref?ref.map((x,i)=>(i?'L':'M')+X(a.length-ref.length+i).toFixed(1)+' '+Y(x[1]).toFixed(1)).join(''):'';
+ for(let k=0;k<=3;k++){const y=lo+(hi-lo)*k/3;g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(y)}" y2="${Y(y)}" stroke="var(--line)"/><text x="${m.l-4}" y="${Y(y)+3}" text-anchor="end">${fmt(y,0)}</text>`}
+ const d0=new Date(typeof a[0][0]==='string'?a[0][0]:a[0][0]*1000).toLocaleDateString(undefined,{month:'short',year:'2-digit'}),d1=new Date(typeof a[0][0]==='string'?a[a.length-1][0]:a[a.length-1][0]*1000).toLocaleDateString(undefined,{month:'short',year:'2-digit'});
+ const path=a.map((x,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(x[1]).toFixed(1)).join('');
+ return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" data-s="">${g}
+ ${ref?`<path d="${rp}" fill="none" stroke="var(--mut)" stroke-width="1.4" stroke-dasharray="4 3"/>`:`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(avg)}" y2="${Y(avg)}" stroke="${color}" stroke-dasharray="4 3" opacity=".5"/>`}
+ <path d="${path}" fill="none" stroke="${color}" stroke-width="1.8"/>
+ <circle cx="${X(a.length-1)}" cy="${Y(v[v.length-1])}" r="3.5" fill="${color}"/>
+ <text x="${m.l}" y="${H-4}">${d0}</text><text x="${W-m.r}" y="${H-4}" text-anchor="end">${d1}</text></svg>`}
+function render(){if(!D)return;const S=D.series;
+ document.getElementById('upd').innerHTML=`Updated ${D.updated} · auto-refresh every 5 min`+(D.stale?` · <span class="err">refresh failed, showing last good data</span>`:'')+(Object.keys(D.errors).length?` · <span class="err">missing: ${Object.keys(D.errors).join(', ')}</span>`:'');
+ document.getElementById('tiles').innerHTML=TILES.filter(t=>S[t[0]]).map(([k,u])=>{const s=stat(S[k]);
+  return `<div class="tile"><div class="n">${k}</div><div class="v">${fmt(s.l)} <span class="n">${u}</span></div><div class="c ${s.dd>=0?'up':'dn'}">${s.dd>=0?'▲':'▼'} ${fmt(Math.abs(s.dd))} day · <span class="${s.dr>=0?'up':'dn'}">${s.dr>=0?'+':'−'}${fmt(Math.abs(s.dr))} over range</span></div></div>`}).join('');
+ document.getElementById('charts').innerHTML=CH.filter(c=>S[c[0]]).map(([k,d,c])=>{const s=stat(S[k]);
+  return `<div class="card"><h2>${k}</h2><div class="d">${d} · range avg ${fmt(s.avg)} (dashed) · high ${fmt(s.hi)} · low ${fmt(s.lo)}</div>${chart(S[k],c)}</div>`}).join('')}
+const EC=[['US commercial crude stocks (ex-SPR)','Million bbl, weekly','#1f5fbf'],['Cushing crude stocks','Million bbl, weekly','#7a4fc4'],['US gasoline stocks','Million bbl, weekly','#12805c'],['US distillate stocks','Million bbl, weekly','#c0392b'],['Refinery utilisation','% of operable capacity','#b45f06'],['Refinery crude runs','Million bbl/day (crude inputs)','#0e7490']];
+function renderE(){if(!E)return;const S=E.series,K=Object.keys(S);
+ document.getElementById('eiaupd').innerHTML=`Weekly, latest week ending ${K.length?S[K[0]].data.at(-1)[0]:'–'} · dashed line = 5-year average for the same week`+(E.stale?' · <span class="err">showing last good data</span>':'')+(Object.keys(E.errors).length?` · <span class="err">missing: ${Object.keys(E.errors).join(', ')}</span>`:'');
+ document.getElementById('etiles').innerHTML=EC.filter(c=>S[c[0]]).map(([k])=>{const x=S[k],d=x.data,l=d.at(-1)[1],w=l-d.at(-2)[1],a=x.avg5.at(-1)?l-x.avg5.at(-1)[1]:null,u=x.unit==='%'?'%':x.unit==='mb'?'mb':'mb/d';
+  const good=k.includes('stocks')?w<0:w>0;
+  return `<div class="tile"><div class="n">${k}</div><div class="v">${fmt(l,x.unit==='%'?1:1)} <span class="n">${u}</span></div><div class="c ${good?'up':'dn'}">${w>=0?'▲':'▼'} ${fmt(Math.abs(w),1)} w/w</div><div class="c n">${a==null?'':(a>=0?'+':'−')+fmt(Math.abs(a),1)+' vs 5-yr avg'}</div></div>`}).join('');
+ document.getElementById('echarts').innerHTML=EC.filter(c=>S[c[0]]).map(([k,d,c])=>`<div class="card"><h2>${k}</h2><div class="d">${d} · last 52 weeks</div>${chart(S[k].data,c,S[k].avg5,true)}</div>`).join('')}
+function renderNews(){const q=document.getElementById('q').value.toLowerCase();
+ document.getElementById('news').innerHTML=N.filter(n=>n.title.toLowerCase().includes(q)).map(n=>`<li><span class="tag">${n.source}</span><a href="${n.link}" target="_blank" rel="noopener">${n.title.replace(/</g,'&lt;')}</a><div class="src">${n.date}</div></li>`).join('')||'<li>No matches.</li>'}
+async function jget(u){const r=await fetch(u);if(!r.ok)throw new Error(u+' -> HTTP '+r.status);return r.json()}
+async function load(){let bad=false;
+ try{D=await jget('data/prices.json');render();if(!Object.keys(D.series).length){bad=true;document.getElementById('upd').innerHTML='<span class="err">Price feed unavailable (network/Yahoo). Retrying in 30s. '+Object.values(D.errors)[0]+'</span>'}}
+ catch(e){bad=true;document.getElementById('upd').innerHTML='<span class="err">Could not load data. If running locally, is run.bat still running? ('+e.message+')</span>'}
+ try{E=await jget('data/eia.json');renderE()}catch(e){bad=true;document.getElementById('eiaupd').innerHTML='<span class="err">EIA unavailable: '+e.message+'</span>'}
+ try{N=await jget('data/news.json');renderNews()}catch(e){}
+ if(bad)setTimeout(load,30000)}
+document.getElementById('rng').onclick=e=>{if(e.target.dataset.r){R=+e.target.dataset.r;[...e.currentTarget.children].forEach(b=>b.classList.toggle('on',b===e.target));render()}};
+document.getElementById('q').oninput=renderNews;
+load();setInterval(load,300000);
+</script></body></html>

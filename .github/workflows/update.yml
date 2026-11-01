@@ -1,0 +1,24 @@
+name: Update data
+on:
+  schedule:
+    - cron: "*/30 * * * 1-5"   # every 30 min, weekdays (UTC)
+  workflow_dispatch: {}
+permissions:
+  contents: write
+concurrency: update-data
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python build_data.py
+        env:
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY || 'DEMO_KEY' }}
+      - name: Commit data
+        run: |
+          git config user.name "dashboard-bot"
+          git config user.email "dashboard-bot@users.noreply.github.com"
+          git add docs/data
+          git diff --cached --quiet || (git commit -m "Update data" && git push)
